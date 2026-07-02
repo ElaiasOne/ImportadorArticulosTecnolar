@@ -8,8 +8,11 @@ const importController = require('../controllers/importController');
 
 const router = express.Router();
 
-// Asegurar que exista la carpeta de uploads
-const uploadsDir = path.join(__dirname, '../../uploads');
+// Asegurar que exista la carpeta de uploads en una ruta de escritura válida
+const uploadsDir = process.pkg
+  ? path.join(path.dirname(process.execPath), 'uploads')
+  : path.join(__dirname, '../../uploads');
+
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }

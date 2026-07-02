@@ -1,3 +1,28 @@
+// Polyfill para compatibilidad de mssql con Node.js < 18.16.0 (empaquetado por pkg)
+try {
+  const dc = require('node:diagnostics_channel');
+  if (typeof dc.tracingChannel !== 'function') {
+    dc.tracingChannel = function(name) {
+      const dummyChannel = { hasSubscribers: false };
+      return {
+        name,
+        start: dummyChannel,
+        end: dummyChannel,
+        asyncStart: dummyChannel,
+        asyncEnd: dummyChannel,
+        error: dummyChannel,
+        hasSubscribers: false,
+        subscribe: () => {},
+        unsubscribe: () => {},
+        tracePromise: (fn) => fn(),
+        traceCallback: (fn, position, context, thisArg, ...args) => fn.apply(thisArg, args)
+      };
+    };
+  }
+} catch (e) {
+  console.warn('No se pudo inicializar el polyfill de tracingChannel:', e.message);
+}
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
