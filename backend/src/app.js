@@ -23,6 +23,29 @@ try {
   console.warn('No se pudo inicializar el polyfill de tracingChannel:', e.message);
 }
 
+// Polyfill para AbortSignal.any (requerido por tedious/mssql, introducido en Node v20 pero no disponible en Node v18.5 empaquetado por pkg)
+try {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any !== 'function') {
+    AbortSignal.any = function(signals) {
+      const controller = new AbortController();
+      for (const signal of signals) {
+        if (signal) {
+          if (signal.aborted) {
+            controller.abort(signal.reason);
+            break;
+          }
+          signal.addEventListener('abort', () => {
+            controller.abort(signal.reason);
+          }, { once: true });
+        }
+      }
+      return controller.signal;
+    };
+  }
+} catch (e) {
+  console.warn('No se pudo inicializar el polyfill de AbortSignal.any:', e.message);
+}
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
