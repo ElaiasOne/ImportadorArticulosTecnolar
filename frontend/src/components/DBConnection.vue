@@ -70,7 +70,7 @@
       <div class="button-row">
         <button 
           class="btn-primary" 
-          :disabled="loading || !database" 
+          :disabled="loading || !database || !dbUser || !dbPassword" 
           @click="handleConnect"
         >
           <i v-if="loading" class="pi pi-spin pi-spinner"></i>
@@ -107,8 +107,8 @@ export default {
   setup(props, { emit }) {
     const server = ref('localhost');
     const database = ref('');
-    const dbUser = ref('sa');
-    const dbPassword = ref('LaCrujia_3261');
+    const dbUser = ref('');
+    const dbPassword = ref('');
     const loading = ref(false);
     const errorMsg = ref('');
     const successMsg = ref('');
