@@ -4,7 +4,7 @@ Herramienta web interna diseñada para técnicos que permite importar artículos
 
 ## Características
 
-- **Conexión Dinámica a SQL Server**: Entrada para ingresar el servidor y nombre de la base de datos de manera dinámica, utilizando credenciales preestablecidas (`sa` / `LaCrujia_3261`).
+- **Conexión Dinámica a SQL Server**: Entrada para ingresar el servidor y nombre de la base de datos de manera dinámica, utilizando credenciales preestablecidas (`PIPI` / `PIPIPI`).
 - **Mapeo Inteligente de Columnas**: Auto-detección automática de nombres comunes de columnas ("costo", "pvp", "descripcion", etc.) con interfaz manual para corregir.
 - **Detección Automática de Pesables**:
   - Busca palabras clave en la descripción (`KG`, `XKG`, `POR KG`, `PRECIO KG`).
