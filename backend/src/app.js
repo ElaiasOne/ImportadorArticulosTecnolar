@@ -46,7 +46,14 @@ try {
   console.warn('No se pudo inicializar el polyfill de AbortSignal.any:', e.message);
 }
 
-require('dotenv').config();
+try {
+  const envPath = process.pkg
+    ? path.join(path.dirname(process.execPath), '.env')
+    : path.join(__dirname, '../.env');
+  require('dotenv').config({ path: envPath });
+} catch (e) {
+  // Ignorar si no existe el archivo .env
+}
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -58,9 +65,9 @@ const PORT = process.env.PORT || 3000;
 // Habilitar CORS para peticiones del frontend
 app.use(cors());
 
-// Configurar límites de tamaño para JSON y urlencoded debido a envíos grandes de datos de la grilla
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Configurar límites de tamaño para JSON y urlencoded debido a envíos grandes de datos de tablas masivas
+app.use(express.json({ limit: '1000mb' }));
+app.use(express.urlencoded({ limit: '1000mb', extended: true }));
 
 // Servir rutas de la API
 app.use('/api', apiRoutes);

@@ -41,7 +41,7 @@ function isPesableDescription(desc) {
 }
 
 /**
- * Normaliza y limpia el código EAN, eliminando el 13.º dígito verificador si tiene 13 dígitos.
+ * Normaliza y limpia el código EAN, eliminando el 13.º dígito verificador si tiene 13 dígitos o removiendo ceros si es código interno.
  */
 function cleanEan(ean) {
   if (ean === null || ean === undefined || ean === '') return '';
@@ -61,8 +61,13 @@ function cleanEan(ean) {
     eanStr = eanStr.split('.')[0];
   }
 
-  if (eanStr.length === 13) {
-    return eanStr.slice(0, 12); // Remueve el último dígito
+  // Si empieza con dos o más ceros (ej. 0000000000001), es un código interno rellenado.
+  // Quitamos todos los ceros a la izquierda y lo dejamos como código numérico limpio.
+  if (eanStr.startsWith('00')) {
+    eanStr = eanStr.replace(/^0+/, '');
+    if (eanStr === '') eanStr = '0';
+  } else if (eanStr.length === 13) {
+    eanStr = eanStr.slice(0, 12); // Remueve el último dígito
   }
   return eanStr;
 }
@@ -189,7 +194,7 @@ function matchDepartmentCode(excelRubro, dbDeptos) {
     code: 0, 
     name: 'NO ASIGNADO', 
     warning: true, 
-    message: `Rubro '${rubroStr}' no encontrado. Se asignó Código 0 por defecto.` 
+    message: 'Rubro no encontrado (se asignó Código 0 por defecto)' 
   };
 }
 
@@ -252,15 +257,32 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
   const filePLUs = new Set();
   const fileDescripciones = new Set();
 
-  // Encuentra el código máximo tanto en la BD como en el Excel para evitar colisiones
-  let currentMaxCode = maxDbCode;
+  // Recolectamos todos los códigos ocupados (de la BD y del Excel) para rellenar huecos
+  const usedCodes = new Set(existingCodigos);
   for (const row of rows) {
-    if (row.CodigoInterno !== null && row.CodigoInterno !== undefined && row.CodigoInterno !== '') {
-      const codeNum = parseInt(row.CodigoInterno, 10);
-      if (!isNaN(codeNum) && codeNum > currentMaxCode) {
-        currentMaxCode = codeNum;
+    let resolvedCode = row.CodigoInterno;
+
+    if (resolvedCode !== null && resolvedCode !== undefined && resolvedCode !== '') {
+      let cleanCodeStr = resolvedCode.toString().trim().replace(/\s+/g, '');
+      if (cleanCodeStr.startsWith('00')) {
+        cleanCodeStr = cleanCodeStr.replace(/^0+/, '');
+        if (cleanCodeStr === '') cleanCodeStr = '0';
+      }
+      const parsedVal = parseInt(cleanCodeStr, 10);
+      if (!isNaN(parsedVal) && parsedVal > 0 && parsedVal <= 2147483647 && cleanCodeStr.length <= 9) {
+        usedCodes.add(parsedVal);
       }
     }
+  }
+
+  // Buscador de códigos libres secuenciales empezando desde maxDbCode + 1 (o 1 si está vacía)
+  let nextCodeSearch = Math.max(1, maxDbCode + 1);
+  function getNextAvailableCode() {
+    while (usedCodes.has(nextCodeSearch)) {
+      nextCodeSearch++;
+    }
+    usedCodes.add(nextCodeSearch);
+    return nextCodeSearch;
   }
 
   const processedRows = [];
@@ -342,42 +364,26 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
     let codeNum = null;
     let resolvedCode = rawCode;
 
-    // Si no hay un Código Interno explícito mapeado pero tenemos un EAN corto, lo usa como Código Interno
-    if ((resolvedCode === null || resolvedCode === undefined || resolvedCode === '') && rawEan) {
-      const eanClean = rawEan.toString().trim();
-      const parsed = parseInt(eanClean, 10);
-      if (!isNaN(parsed) && parsed > 0 && eanClean.length <= 6) {
-        resolvedCode = parsed;
-      }
-    }
-
-    const isFromEanFallback = (rawCode === null || rawCode === undefined || rawCode === '') && (resolvedCode !== null && resolvedCode !== undefined && resolvedCode !== '');
-
     if (resolvedCode !== null && resolvedCode !== undefined && resolvedCode !== '') {
-      const cleanCodeStr = resolvedCode.toString().trim().replace(/\s+/g, '');
+      let cleanCodeStr = resolvedCode.toString().trim().replace(/\s+/g, '');
+      if (cleanCodeStr.startsWith('00')) {
+        cleanCodeStr = cleanCodeStr.replace(/^0+/, '');
+        if (cleanCodeStr === '') cleanCodeStr = '0';
+      }
       const parsedVal = parseInt(cleanCodeStr, 10);
       
       if (!isNaN(parsedVal) && parsedVal > 0 && parsedVal <= 2147483647 && cleanCodeStr.length <= 9) {
-        // Si se resolvió a partir del EAN, verifica si ya existe en la base de datos.
-        // Si existe, no debe usarse como código para evitar colisiones. Hace fallback a autogenerar.
-        if (isFromEanFallback && existingCodigos.has(parsedVal)) {
-          currentMaxCode++;
-          codeNum = currentMaxCode;
-        } else {
-          codeNum = parsedVal;
-        }
+        codeNum = parsedVal;
       } else {
         // Es un EAN estándar o demasiado grande. Se autogenera el Código Interno.
-        currentMaxCode++;
-        codeNum = currentMaxCode;
-        record.messages.push({ type: 'warning', text: `El valor de código '${resolvedCode}' es un EAN o excede el límite. Se autogeneró el Código ${codeNum}.` });
+        codeNum = getNextAvailableCode();
+        record.messages.push({ type: 'warning', text: 'El código original es un EAN o excede el límite (se autogeneró)' });
         if (record.status !== 'error') record.status = 'warning';
       }
     } else {
       // Autogenerar código
-      currentMaxCode++;
-      codeNum = currentMaxCode;
-      record.messages.push({ type: 'warning', text: `Código Interno no provisto. Se autogeneró el Código ${codeNum}.` });
+      codeNum = getNextAvailableCode();
+      record.messages.push({ type: 'warning', text: 'Código Interno no provisto (se autogeneró)' });
       if (record.status !== 'error') record.status = 'warning';
     }
 
@@ -409,26 +415,11 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
 
       const descUpper = cleanedDesc.toUpperCase().trim();
       
-      // Verificar duplicados en la base de datos
-      if (existingDescripciones.has(descUpper)) {
-        const existingCode = existingDescripciones.get(descUpper);
-        if (record.Codigo !== existingCode) {
-          record.messages.push({ type: 'warning', text: `La descripción ya existe en la base de datos (Código ${existingCode}).` });
-          if (record.status !== 'error') record.status = 'warning';
-        }
-      }
-      
-      // Verificar duplicados en el archivo
-      if (fileDescripciones.has(descUpper)) {
-        record.messages.push({ type: 'warning', text: `La descripción está duplicada en el archivo Excel.` });
-        if (record.status !== 'error') record.status = 'warning';
-      }
-      fileDescripciones.add(descUpper);
+      // No realizamos validación de descripción duplicada según requerimiento.
     }
 
-    // 3. Procesar costo y precio
+    // 3. Procesar costo, precio y margen
     let price = 0;
-
     if (rawVenta !== null && rawVenta !== undefined && rawVenta !== '') {
       price = parseMoney(rawVenta);
     } else {
@@ -438,13 +429,33 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
     }
     record.PrecioVenta = price;
 
-    // El costo siempre es un 50% menor al de venta
-    let cost = price * 0.5;
-    record.PrecioCosto = cost;
+    let cost = 0;
+    if (rawCosto !== null && rawCosto !== undefined && rawCosto !== '') {
+      cost = parseMoney(rawCosto);
+    }
+
+    if (cost > 0) {
+      // Si el Excel provee precio de costo, se respeta
+      record.PrecioCosto = cost;
+    } else if (price > 0) {
+      // Si no tiene precio de costo provisto pero sí precio de venta, se calcula el costo (ej: 50% del precio de venta)
+      cost = price * 0.5;
+      record.PrecioCosto = cost;
+    } else {
+      record.PrecioCosto = 0;
+    }
+
+    // Calcular margen según fórmula: ((PrecioVenta - PrecioCosto) / PrecioVenta) * 100
+    if (record.PrecioVenta > 0) {
+      const marginVal = ((record.PrecioVenta - record.PrecioCosto) / record.PrecioVenta) * 100;
+      record.Margen = Number(marginVal.toFixed(2));
+    } else {
+      record.Margen = 0;
+    }
 
     // Advertencia si Venta < Costo
     if (price > 0 && cost > 0 && price < cost) {
-      record.messages.push({ type: 'warning', text: `El precio de venta ($${price}) es menor al precio de costo ($${cost}).` });
+      record.messages.push({ type: 'warning', text: 'El precio de venta es menor al precio de costo.' });
       if (record.status !== 'error') record.status = 'warning';
     }
 
@@ -458,9 +469,14 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
       // Determina el código PLU a partir del EAN o Código
       let plu = 0;
       if (rawEan !== null && rawEan !== undefined && rawEan !== '') {
-        const parsedEanPlu = parseInt(rawEan.toString().replace(/[^0-9]/g, ''), 10);
-        if (!isNaN(parsedEanPlu) && parsedEanPlu > 0 && parsedEanPlu <= 99999) {
-          plu = parsedEanPlu;
+        const cleanEanVal = cleanEan(rawEan);
+        const parsedEanPlu = parseInt(cleanEanVal, 10);
+        if (!isNaN(parsedEanPlu) && parsedEanPlu > 0) {
+          if (cleanEanVal.length <= 6) {
+            plu = parsedEanPlu;
+          } else if (cleanEanVal.length === 12 && cleanEanVal.startsWith('20')) {
+            plu = parseInt(cleanEanVal.substring(2, 7), 10);
+          }
         }
       }
       if (!plu && rawCode !== null && rawCode !== undefined && rawCode !== '') {
@@ -475,12 +491,21 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
 
       record.BalCodigo = plu;
 
+      // Validar que el PLU sea mayor a 0 y de hasta 5 dígitos (máx 99999)
+      if (!record.BalCodigo || record.BalCodigo <= 0 || record.BalCodigo > 99999) {
+        record.messages.push({ 
+          type: 'error', 
+          text: 'El código PLU de balanza (BalCodigo) debe ser mayor a 0 y de hasta 5 dígitos (máx 99999) para productos pesables.' 
+        });
+        record.status = 'error';
+      }
+
       // EAN generado: 20 + BalCodigo (con padding de 5 dígitos) + 00000
       const pluPadded = String(plu).padStart(5, '0');
       record.EAN = `20${pluPadded}00000`; // 12 dígitos
 
       // Verificar duplicados de PLU
-      if (record.BalCodigo > 0) {
+      if (record.BalCodigo > 0 && record.BalCodigo <= 99999) {
         if (existingPLUs.has(record.BalCodigo)) {
           record.messages.push({ type: 'error', text: `El PLU de balanza ${record.BalCodigo} ya existe en la base de datos.` });
           record.status = 'error';
@@ -505,7 +530,7 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
         if (/^\d+$/.test(cleanedEanVal)) {
           record.EAN = cleanedEanVal;
         } else {
-          record.messages.push({ type: 'warning', text: `El EAN '${cleanedEanVal}' contiene caracteres no numéricos. Se conservará pero verifique.` });
+          record.messages.push({ type: 'warning', text: 'El EAN contiene caracteres no numéricos (se conservará pero verifique)' });
           if (record.status !== 'error') record.status = 'warning';
           record.EAN = cleanedEanVal;
         }
@@ -549,9 +574,6 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
     } else {
       record.IVA = ivaResult.code;
     }
-
-    // El margen no se calcula, el cliente lo asignará después. Por defecto 0.
-    record.Margen = 0;
 
     // 7. Procesar Familia y SubFamilia
     if (rawFamilia !== null && rawFamilia !== undefined && rawFamilia !== '') {

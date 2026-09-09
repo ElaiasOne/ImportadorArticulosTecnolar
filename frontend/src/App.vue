@@ -1,125 +1,132 @@
 <template>
   <div class="app-layout">
     
-    <!-- Encabezado premium superior -->
-    <header class="app-header">
-      <div class="logo-container">
-        <i class="pi pi-database logo-icon"></i>
-        <div class="logo-text">Importador de Artículos ERP</div>
-      </div>
-      <div class="user-badge">
-        <i class="pi pi-user-edit"></i>
-        <span>Técnico Tecnolar</span>
-      </div>
-    </header>
+    <!-- Encabezado con navegación y estado de conexión global -->
+    <NavHeader 
+      v-model:activeModule="activeModule"
+      :is-connected="isConnected"
+      :connection="connection"
+      @disconnect="disconnectDb"
+    />
 
     <main class="main-container">
-      
-      <!-- Barra de progreso de pasos del asistente -->
-      <div class="premium-card mb-4" style="padding: 1.5rem 2rem;">
-        <div class="steps-indicator">
-          
-          <div 
-            class="step-node" 
-            :class="{ active: currentStep === 1, completed: currentStep > 1 }"
-          >
-            <div class="step-circle">
-              <span v-if="currentStep <= 1">1</span>
-              <i v-else class="pi pi-check"></i>
-            </div>
-            <span class="step-label">Base de Datos</span>
-          </div>
 
-          <div 
-            class="step-node" 
-            :class="{ active: currentStep === 2, completed: currentStep > 2 }"
-          >
-            <div class="step-circle">
-              <span v-if="currentStep <= 2">2</span>
-              <i v-else class="pi pi-check"></i>
-            </div>
-            <span class="step-label">Mapear Columnas</span>
-          </div>
+      <!-- PANTALLA DE INICIO DE SESIÓN / CONEXIÓN A BASE DE DATOS (Se muestra solo una vez al inicio) -->
+      <DBConnection
+        v-if="!isConnected"
+        class="animate-fade"
+        @connected="onDbConnected"
+      />
 
-          <div 
-            class="step-node" 
-            :class="{ active: currentStep === 3, completed: currentStep > 3 }"
-          >
-            <div class="step-circle">
-              <span v-if="currentStep <= 3">3</span>
-              <i v-else class="pi pi-check"></i>
-            </div>
-            <span class="step-label">Vista Previa y Ajustes</span>
-          </div>
-
-          <div 
-            class="step-node" 
-            :class="{ active: currentStep === 4, completed: currentStep > 4 }"
-          >
-            <div class="step-circle">
-              <span>4</span>
-            </div>
-            <span class="step-label">Importación Exitosa</span>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- Vista principal del paso -->
-      <div class="step-content-container">
+      <!-- VISTA TRAS CONEXIÓN EXITOSA -->
+      <template v-else>
         
-        <!-- PASO 1: Conectar a la Base de Datos -->
-        <DBConnection
-          v-if="currentStep === 1"
-          @connected="onDbConnected"
-        />
+        <!-- VISTA 1: Importador de Artículos ERP desde Excel -->
+        <div v-if="activeModule === 'articulos'" class="animate-fade">
+          <!-- Barra de progreso de pasos del asistente (Paso 2 al 4) -->
+          <div class="premium-card mb-4" style="padding: 1.25rem 2rem;">
+            <div class="steps-indicator">
+              
+              <div class="step-node completed">
+                <div class="step-circle">
+                  <i class="pi pi-check"></i>
+                </div>
+                <span class="step-label">Base de Datos</span>
+              </div>
 
-        <!-- PASO 2: Subir Excel y Mapear Campos -->
-        <FileUpload
-          v-else-if="currentStep === 2"
-          :connection="connection"
-          @processed="onExcelProcessed"
-          @back="currentStep = 1"
-        />
+              <div 
+                class="step-node" 
+                :class="{ active: currentStep === 2, completed: currentStep > 2 }"
+              >
+                <div class="step-circle">
+                  <span v-if="currentStep <= 2">2</span>
+                  <i v-else class="pi pi-check"></i>
+                </div>
+                <span class="step-label">Mapear Columnas</span>
+              </div>
 
-        <!-- PASO 3: Vista Previa en Grilla -->
-        <PreviewGrid
-          v-else-if="currentStep === 3"
-          :rows="gridRows"
-          :connection="connection"
-          :db-metadata="dbMetadata"
-          :file-path="excelFilePath"
-          @back="currentStep = 2"
-          @imported="onImportedSuccessfully"
-        />
+              <div 
+                class="step-node" 
+                :class="{ active: currentStep === 3, completed: currentStep > 3 }"
+              >
+                <div class="step-circle">
+                  <span v-if="currentStep <= 3">3</span>
+                  <i v-else class="pi pi-check"></i>
+                </div>
+                <span class="step-label">Vista Previa y Ajustes</span>
+              </div>
 
-        <!-- PASO 4: Vista de Éxito -->
-        <div v-else-if="currentStep === 4" class="premium-card success-screen animate-fade">
-          <div class="success-icon-wrapper">
-            <i class="pi pi-check-circle success-large-icon"></i>
-          </div>
-          <h2 class="success-title">¡Importación Completada!</h2>
-          <p class="success-desc">{{ importedMessage }}</p>
-          
-          <div class="imported-details">
-            <div class="detail-item">
-              <span class="detail-lbl">Base de Datos:</span>
-              <span class="detail-val">{{ connection.database }}</span>
+              <div 
+                class="step-node" 
+                :class="{ active: currentStep === 4, completed: currentStep > 4 }"
+              >
+                <div class="step-circle">
+                  <span>4</span>
+                </div>
+                <span class="step-label">Importación Exitosa</span>
+              </div>
+
             </div>
-            <div class="detail-item">
-              <span class="detail-lbl">Servidor:</span>
-              <span class="detail-val">{{ connection.server }}</span>
-            </div>
           </div>
 
-          <div class="success-actions">
-            <button class="btn-primary" @click="resetWizard">
-              <i class="pi pi-refresh"></i> Importar otro archivo
-            </button>
+          <!-- Vista principal del paso de Artículos -->
+          <div class="step-content-container">
+
+            <!-- PASO 2: Subir Excel y Mapear Campos -->
+            <FileUpload
+              v-if="currentStep === 2"
+              :connection="connection"
+              @processed="onExcelProcessed"
+              @back="disconnectDb"
+            />
+
+            <!-- PASO 3: Vista Previa en Grilla -->
+            <PreviewGrid
+              v-else-if="currentStep === 3"
+              :rows="gridRows"
+              :connection="connection"
+              :db-metadata="dbMetadata"
+              :file-path="excelFilePath"
+              @back="currentStep = 2"
+              @imported="onImportedSuccessfully"
+            />
+
+            <!-- PASO 4: Vista de Éxito -->
+            <div v-else-if="currentStep === 4" class="premium-card success-screen animate-fade">
+              <div class="success-icon-wrapper">
+                <i class="pi pi-check-circle success-large-icon"></i>
+              </div>
+              <h2 class="success-title">¡Importación Completada!</h2>
+              <p class="success-desc">{{ importedMessage }}</p>
+              
+              <div class="imported-details">
+                <div class="detail-item">
+                  <span class="detail-lbl">Base de Datos:</span>
+                  <span class="detail-val">{{ connection.database }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-lbl">Servidor:</span>
+                  <span class="detail-val">{{ connection.server }}</span>
+                </div>
+              </div>
+
+              <div class="success-actions">
+                <button class="btn-primary" @click="resetWizard">
+                  <i class="pi pi-refresh"></i> Importar otro archivo Excel
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
 
-      </div>
+        <!-- VISTA 2: Exportador / Importador Universal de SQL Server (Consume conexión única) -->
+        <UniversalSqlManager 
+          v-else-if="activeModule === 'universal'" 
+          :connection="connection"
+        />
+
+      </template>
 
     </main>
   </div>
@@ -127,21 +134,27 @@
 
 <script>
 import { ref } from 'vue';
+import NavHeader from './components/NavHeader.vue';
 import DBConnection from './components/DBConnection.vue';
 import FileUpload from './components/FileUpload.vue';
 import PreviewGrid from './components/PreviewGrid.vue';
+import UniversalSqlManager from './components/UniversalSqlManager.vue';
 
 export default {
   name: 'App',
   components: {
+    NavHeader,
     DBConnection,
     FileUpload,
-    PreviewGrid
+    PreviewGrid,
+    UniversalSqlManager
   },
   setup() {
-    const currentStep = ref(1);
+    const isConnected = ref(false);
+    const activeModule = ref('articulos');
+    const currentStep = ref(2);
     
-    // Detalles de la conexión a la base de datos
+    // Detalles de la conexión global a la base de datos
     const connection = ref({
       server: '',
       database: '',
@@ -168,6 +181,17 @@ export default {
       connection.value.user = data.user;
       connection.value.password = data.password;
       dbMetadata.value = data.metadata;
+      isConnected.value = true;
+      currentStep.value = 2; // Avanzar directo a subir Excel
+    };
+
+    const disconnectDb = () => {
+      isConnected.value = false;
+      connection.value = { server: '', database: '', user: '', password: '' };
+      dbMetadata.value = { departamentos: [], ivas: [] };
+      excelFilePath.value = '';
+      gridRows.value = [];
+      importedMessage.value = '';
       currentStep.value = 2;
     };
 
@@ -186,10 +210,12 @@ export default {
       excelFilePath.value = '';
       gridRows.value = [];
       importedMessage.value = '';
-      currentStep.value = 2; // Volver al paso de subir Excel, manteniendo activa la conexión a la BD
+      currentStep.value = 2;
     };
 
     return {
+      isConnected,
+      activeModule,
       currentStep,
       connection,
       dbMetadata,
@@ -197,6 +223,7 @@ export default {
       gridRows,
       importedMessage,
       onDbConnected,
+      disconnectDb,
       onExcelProcessed,
       onImportedSuccessfully,
       resetWizard

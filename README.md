@@ -30,6 +30,67 @@ Al ejecutarse, el binario genera y busca los siguientes elementos en su mismo di
 
 ---
 
+## 📖 Guía Operativa para el Técnico
+
+Esta guía detalla los requisitos del archivo de datos y el flujo de uso del importador para garantizar una migración exitosa.
+
+### 📋 1. Cómo Solicitar el Excel al Cliente
+Para que el sistema procese la información correctamente, pídele al cliente un archivo Excel con las siguientes características:
+* **Formato**: Obligatoriamente libro de Excel estándar con extensión **`.xlsx`** (no se admiten `.xls` antiguos ni `.csv`).
+* **Estructura limpia**: 
+  * Los datos deben estar en la **primera pestaña** (hoja) del archivo.
+  * La **primera fila** debe contener los nombres de las columnas (cabeceras). No dejes renglones vacíos arriba ni celdas combinadas en los títulos.
+* **Columnas mínimas sugeridas** (para mapear contra el ERP):
+  * **Código Interno**: Código numérico único identificador del artículo en el sistema anterior.
+  * **EAN / Código de Barras**: Código de barras de los artículos (opcional, si no posee, el sistema generará uno automáticamente).
+  * **Descripción**: Nombre o descripción del artículo.
+  * **Precio de Costo**: Costo de compra neto del producto.
+  * **Precio de Venta**: Precio final al público (IVA incluido).
+  * **IVA**: Porcentaje de IVA correspondiente (ej. `21`, `10.5` o el formato numérico/porcentaje que traiga).
+  * **Rubro / Departamento**: Nombre del rubro (ej. Carnicería, Almacén, Lacteos).
+
+---
+
+### ⚙️ 2. Flujo de Trabajo y Carga de Datos
+
+El proceso de importación consta de 5 sencillos pasos dentro de la interfaz web:
+
+#### 🔌 Paso A: Conexión a SQL Server
+1. Ejecuta `ImportadorArticulos.exe` en la máquina destino y abre la interfaz (`http://localhost:3000`).
+2. Completa los datos: **Servidor** (ej: `localhost`, `localhost\SQLEXPRESS` o `.\SQLEXPRESS`), **Base de datos**, **Usuario (sa)** y **Contraseña**.
+3. Presiona **Conectar y Continuar**.
+   * *Soporte Técnico:* Si ocurre un error de conexión TCP/IP, el sistema te mostrará una guía en pantalla detallando cómo activar TCP/IP en la configuración de SQL Server del cliente y reiniciar el servicio.
+
+#### 📁 Paso B: Selección del Archivo
+1. Arrastra o selecciona el archivo `.xlsx` del cliente.
+2. El sistema leerá automáticamente la estructura del archivo y habilitará el siguiente paso.
+
+#### 🗺️ Paso C: Mapeo de Columnas
+1. Asocia las columnas que detectó el Excel con los campos requeridos por el ERP:
+   * *Obligatorios:* Código Interno, Descripción, Costo, Venta, IVA y Rubro.
+   * *Opcionales:* EAN (Código de Barras), Familia y SubFamilia.
+2. El sistema autodetecta coincidencias lógicas (ej: si en el Excel dice "Costo Neto", lo sugerirá para "PrecioCosto").
+3. Presiona **Procesar y Validar**.
+
+#### 🔍 Paso D: Previsualización y Corrección de Errores (Grilla Interactiva)
+Se presentará una grilla dinámica con todos los artículos procesados y listos para importar. El sistema analiza automáticamente las reglas de negocio y muestra los siguientes indicadores visuales:
+* ❌ **Errores Críticos**:
+  * EANs duplicados en la planilla o que ya existan en la base de datos de destino.
+  * Descripciones duplicadas (en la planilla o en la base de datos).
+  * PLU de balanza duplicado o faltante para pesables.
+  * IVA inválido o campos obligatorios vacíos.
+  * *Nota:* Los artículos con error crítico no se pueden importar. Para corregirlos, **haz doble clic directamente sobre la celda en la grilla**, edita el valor erróneo y presiona `Enter`. La celda se revalidará al instante.
+* ⚠️ **Advertencias**:
+  * Precio de venta menor o igual al precio de costo. *(Te permite importar, pero te alerta del margen negativo)*.
+* **Filtros y Búsqueda**: Puedes usar las cajas de búsqueda en la parte superior de cada columna para filtrar o buscar productos específicos (ej: buscar solo productos con `❌` para corregirlos rápido).
+
+#### 💾 Paso E: Confirmación e Inserción
+1. Una vez que hayas resuelto todos los errores críticos (`❌`), el botón **Confirmar e Importar** se habilitará.
+2. Presiona el botón para procesar la importación masiva.
+3. El proceso es **100% transaccional**: si un solo artículo falla al insertarse, se aplica un *rollback* completo y la base de datos no se altera, informándote exactamente qué artículo causó la falla para que lo soluciones.
+
+---
+
 ## 🛠️ Desarrollo y Ejecución desde Código Fuente
 
 Si deseas modificar la aplicación o ejecutarla en modo desarrollo:

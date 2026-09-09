@@ -33,6 +33,19 @@
         />
       </div>
 
+      <div v-if="availableMessages.length > 0" class="message-filter-box animate-fade">
+        <select v-model="selectedMessageFilter" class="select-input message-filter-select">
+          <option value="">-- Todos los mensajes --</option>
+          <option 
+            v-for="msg in availableMessages" 
+            :key="msg.text" 
+            :value="msg.text"
+          >
+            {{ msg.label }} ({{ msg.count }})
+          </option>
+        </select>
+      </div>
+
       <div class="button-group">
         <button class="btn-secondary" @click="$emit('back')">
           <i class="pi pi-arrow-left"></i> Cambiar Mapeo
@@ -64,6 +77,7 @@
             <th @click="changeSort('Codigo')">Código <i class="pi pi-sort"></i></th>
             <th @click="changeSort('Descripcion')">Descripción <i class="pi pi-sort"></i></th>
             <th @click="changeSort('EAN')">EAN / Código Barras <i class="pi pi-sort"></i></th>
+            <th @click="changeSort('BalCodigo')">PLU Balanza <i class="pi pi-sort"></i></th>
             <th @click="changeSort('PrecioCosto')">Precio Costo <i class="pi pi-sort"></i></th>
             <th @click="changeSort('PrecioVenta')">Precio Venta <i class="pi pi-sort"></i></th>
             <th>IVA (Código)</th>
@@ -135,6 +149,20 @@
                 ref="editInput"
               />
               <span v-else class="font-mono">{{ row.EAN || '---' }}</span>
+            </td>
+
+            <td :class="{ 'editable-cell': row.HabilBalanzas }" @dblclick="row.HabilBalanzas && startEdit(row, 'BalCodigo')">
+              <input 
+                v-if="isEditing(row, 'BalCodigo')" 
+                v-model.number="editValue" 
+                type="number"
+                class="cell-input"
+                @blur="saveEdit(row, 'BalCodigo')"
+                @keyup.enter="saveEdit(row, 'BalCodigo')"
+                @keyup.esc="cancelEdit"
+                ref="editInput"
+              />
+              <span v-else class="font-mono">{{ row.HabilBalanzas ? row.BalCodigo : '---' }}</span>
             </td>
 
             <td class="editable-cell" @dblclick="startEdit(row, 'PrecioCosto')">
@@ -236,7 +264,7 @@
           </tr>
 
           <tr v-if="filteredRows.length === 0">
-            <td colspan="11" class="no-data">
+            <td colspan="12" class="no-data">
               <i class="pi pi-info-circle"></i> No se encontraron registros que coincidan con la búsqueda o el filtro.
             </td>
           </tr>
@@ -397,6 +425,7 @@ export default {
     const gridRows = ref([...props.rows]);
     const globalFilter = ref('');
     const filterStatus = ref(''); // success, warning, error, o vacío para todos
+    const selectedMessageFilter = ref('');
     
     // Paginación
     const currentPage = ref(1);
@@ -424,6 +453,32 @@ export default {
     const countWarning = computed(() => gridRows.value.filter(r => r.status === 'warning').length);
     const countError = computed(() => gridRows.value.filter(r => r.status === 'error').length);
 
+    // Obtiene y agrupa todos los mensajes activos en la grilla para el filtro dropdown (solo advertencias)
+    const availableMessages = computed(() => {
+      const counts = {};
+      gridRows.value.forEach(row => {
+        if (row.messages && row.messages.length > 0) {
+          row.messages.forEach(msg => {
+            if (msg.type === 'warning') { // Solo advertencias
+              const key = msg.text;
+              if (!counts[key]) {
+                counts[key] = {
+                  text: msg.text,
+                  count: 0
+                };
+              }
+              counts[key].count++;
+            }
+          });
+        }
+      });
+      return Object.values(counts).map(info => ({
+        label: `⚠️ ${info.text}`,
+        text: info.text,
+        count: info.count
+      })).sort((a, b) => b.count - a.count); // Mayor cantidad primero
+    });
+
     // Funciones auxiliares para etiquetas
     const getIvaLabel = (code) => {
       const match = props.dbMetadata.ivas.find(iva => iva.Codigo === code);
@@ -442,6 +497,13 @@ export default {
       // Filtro de estado
       if (filterStatus.value) {
         filtered = filtered.filter(r => r.status === filterStatus.value);
+      }
+
+      // Filtro por tipo de mensaje específico
+      if (selectedMessageFilter.value) {
+        filtered = filtered.filter(r => 
+          r.messages && r.messages.some(m => m.text === selectedMessageFilter.value)
+        );
       }
 
       // Filtro por texto de búsqueda
@@ -497,6 +559,7 @@ export default {
       } else {
         filterStatus.value = status;
       }
+      selectedMessageFilter.value = '';
       currentPage.value = 1;
     };
 
@@ -544,7 +607,7 @@ export default {
       row[field] = editValue.value;
       
       // Realizar verificación de validación local para esta fila
-      validateRow(row);
+      validateRow(row, field);
 
       // Forzar reactividad del computed
       gridRows.value = [...gridRows.value];
@@ -570,7 +633,26 @@ export default {
       });
     };
 
-    const validateRow = (row) => {
+    const cleanEan = (ean) => {
+      if (ean === null || ean === undefined || ean === '') return '';
+      let eanStr = ean.toString().replace(/\s+/g, '');
+      if (eanStr.toLowerCase().includes('e')) {
+        const num = Number(eanStr);
+        if (!isNaN(num)) eanStr = num.toFixed(0);
+      }
+      if (eanStr.includes('.')) {
+        eanStr = eanStr.split('.')[0];
+      }
+      if (eanStr.startsWith('00')) {
+        eanStr = eanStr.replace(/^0+/, '');
+        if (eanStr === '') eanStr = '0';
+      } else if (eanStr.length === 13) {
+        eanStr = eanStr.slice(0, 12);
+      }
+      return eanStr;
+    };
+
+    const validateRow = (row, editedField) => {
       row.messages = [];
       row.status = 'success';
 
@@ -578,49 +660,61 @@ export default {
       let codeNum = null;
       let resolvedCode = row.Codigo;
 
-      // Extraer EAN corto como código si no hay código provisto
-      if ((resolvedCode === null || resolvedCode === undefined || resolvedCode === '') && row.EAN) {
-        const eanClean = row.EAN.toString().trim();
-        const parsed = parseInt(eanClean, 10);
-        if (!isNaN(parsed) && parsed > 0 && eanClean.length <= 6) {
-          resolvedCode = parsed;
-        }
-      }
+
 
       if (resolvedCode !== null && resolvedCode !== undefined && resolvedCode !== '') {
-        const cleanCodeStr = resolvedCode.toString().trim().replace(/\s+/g, '');
+        let cleanCodeStr = resolvedCode.toString().trim().replace(/\s+/g, '');
+        if (cleanCodeStr.startsWith('00')) {
+          cleanCodeStr = cleanCodeStr.replace(/^0+/, '');
+          if (cleanCodeStr === '') cleanCodeStr = '0';
+        }
         const parsedVal = parseInt(cleanCodeStr, 10);
+
+        const getNextFreeCode = () => {
+          const usedCodes = new Set();
+          gridRows.value.forEach(r => {
+            if (r !== row && r.Codigo) {
+              const num = parseInt(r.Codigo, 10);
+              if (!isNaN(num)) {
+                usedCodes.add(num);
+              }
+            }
+          });
+          let search = 1;
+          while (usedCodes.has(search)) {
+            search++;
+          }
+          return search;
+        };
 
         if (!isNaN(parsedVal) && parsedVal > 0 && parsedVal <= 2147483647 && cleanCodeStr.length <= 9) {
           codeNum = parsedVal;
         } else {
           // EAN o demasiado grande. Autogenerar código
-          let maxGridCode = 0;
-          gridRows.value.forEach(r => {
-            if (r !== row && r.Codigo) {
-              const num = parseInt(r.Codigo, 10);
-              if (!isNaN(num) && num > maxGridCode) {
-                maxGridCode = num;
-              }
-            }
-          });
-          codeNum = maxGridCode + 1;
-          row.messages.push({ type: 'warning', text: `El valor de código '${resolvedCode}' es un EAN o excede el límite. Se autogeneró el Código ${codeNum}.` });
+          codeNum = getNextFreeCode();
+          row.messages.push({ type: 'warning', text: 'El código original es un EAN o excede el límite (se autogeneró)' });
           if (row.status !== 'error') row.status = 'warning';
         }
       } else {
         // Autogenerar código
-        let maxGridCode = 0;
-        gridRows.value.forEach(r => {
-          if (r !== row && r.Codigo) {
-            const num = parseInt(r.Codigo, 10);
-            if (!isNaN(num) && num > maxGridCode) {
-              maxGridCode = num;
+        const getNextFreeCode = () => {
+          const usedCodes = new Set();
+          gridRows.value.forEach(r => {
+            if (r !== row && r.Codigo) {
+              const num = parseInt(r.Codigo, 10);
+              if (!isNaN(num)) {
+                usedCodes.add(num);
+              }
             }
+          });
+          let search = 1;
+          while (usedCodes.has(search)) {
+            search++;
           }
-        });
-        codeNum = maxGridCode + 1;
-        row.messages.push({ type: 'warning', text: `Código Interno no provisto. Se autogeneró el Código ${codeNum}.` });
+          return search;
+        };
+        codeNum = getNextFreeCode();
+        row.messages.push({ type: 'warning', text: 'Código Interno no provisto (se autogeneró)' });
         if (row.status !== 'error') row.status = 'warning';
       }
 
@@ -661,18 +755,53 @@ export default {
         row.HabilBalanzas = true;
         
         let plu = 0;
-        if (row.EAN) {
-          const cleanEanVal = row.EAN.toString().replace(/[^0-9]/g, '');
-          const parsed = parseInt(cleanEanVal, 10);
-          if (!isNaN(parsed) && parsed > 0 && cleanEanVal.length <= 6) {
-            plu = parsed;
+        if (editedField === 'BalCodigo') {
+          if (row.BalCodigo && row.BalCodigo > 0 && row.BalCodigo <= 99999) {
+            plu = row.BalCodigo;
+          }
+        } else if (editedField === 'EAN') {
+          if (row.EAN) {
+            const eanClean = cleanEan(row.EAN);
+            const parsed = parseInt(eanClean, 10);
+            if (!isNaN(parsed) && parsed > 0) {
+              if (eanClean.length <= 6) {
+                plu = parsed;
+              } else if (eanClean.length === 12 && eanClean.startsWith('20')) {
+                plu = parseInt(eanClean.substring(2, 7), 10);
+              }
+            }
+          }
+        } else {
+          if (row.BalCodigo && row.BalCodigo > 0 && row.BalCodigo <= 99999) {
+            plu = row.BalCodigo;
+          } else if (row.EAN) {
+            const eanClean = cleanEan(row.EAN);
+            const parsed = parseInt(eanClean, 10);
+            if (!isNaN(parsed) && parsed > 0) {
+              if (eanClean.length <= 6) {
+                plu = parsed;
+              } else if (eanClean.length === 12 && eanClean.startsWith('20')) {
+                plu = parseInt(eanClean.substring(2, 7), 10);
+              }
+            }
           }
         }
+
         if (!plu && row.Codigo) {
           plu = row.Codigo % 100000;
         }
 
         row.BalCodigo = plu;
+
+        // Validar que el PLU sea mayor a 0 y de hasta 5 dígitos (máx 99999)
+        if (!row.BalCodigo || row.BalCodigo <= 0 || row.BalCodigo > 99999) {
+          row.messages.push({ 
+            type: 'error', 
+            text: 'El código PLU de balanza (BalCodigo) debe ser mayor a 0 y de hasta 5 dígitos (máx 99999) para productos pesables.' 
+          });
+          row.status = 'error';
+        }
+
         const codePadded = String(plu).padStart(5, '0');
         row.EAN = `20${codePadded}00000`; // EAN generado
       } else {
@@ -682,11 +811,7 @@ export default {
         
         // Limpiar EAN
         if (row.EAN) {
-          let cleanEanVal = row.EAN.toString().replace(/\s+/g, '');
-          if (cleanEanVal.length === 13) {
-            cleanEanVal = cleanEanVal.slice(0, 12);
-          }
-          row.EAN = cleanEanVal;
+          row.EAN = cleanEan(row.EAN);
         } else if (row.Codigo) {
           // Regenerar EAN de fallback
           row.EAN = '779' + String(row.Codigo).padStart(9, '0');
@@ -781,7 +906,9 @@ export default {
       confirmImport,
       executeImport,
       formatNumber,
-      removeRow
+      removeRow,
+      selectedMessageFilter,
+      availableMessages
     };
   }
 };
@@ -876,10 +1003,42 @@ export default {
   gap: 1.5rem;
 }
 
+.message-filter-box {
+  display: flex;
+  align-items: center;
+  min-width: 320px;
+  max-width: 450px;
+  flex-grow: 1;
+}
+
+.message-filter-select {
+  width: 100%;
+  padding: 0.6rem 2.25rem 0.6rem 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.message-filter-select:focus {
+  border-color: var(--color-primary);
+}
+
 @media (max-width: 768px) {
   .actions-bar {
     flex-direction: column;
     align-items: stretch;
+  }
+  .message-filter-box {
+    max-width: 100%;
   }
 }
 

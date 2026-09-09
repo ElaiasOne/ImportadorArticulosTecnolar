@@ -166,9 +166,9 @@ export default {
 
     // Reglas auxiliares para auto-detección de mapeos
     const autoMapRules = {
-      CodigoInterno: ['codigo', 'cod', 'intern', 'id', 'articulo', 'art', 'clie', 'plu'],
+      CodigoInterno: ['codigo', 'cod', 'intern', 'id', 'clie', 'plu'],
       EAN: ['ean', 'barras', 'codigobarras', 'cod_barra', 'barra', 'upc'],
-      Descripcion: ['descripcion', 'desc', 'nombre', 'detalle', 'producto', 'art'],
+      Descripcion: ['descripcion', 'desc', 'nombre', 'detalle', 'producto', 'articulo', 'art'],
       PrecioCosto: ['costo', 'compra', 'cost', 'cost_price', 'precio_costo', 'p_costo'],
       PrecioVenta: ['venta', 'precio', 'pvp', 'p.v.p', 'publico', 'venta_price', 'precio_venta', 'p_venta'],
       IVA: ['iva', 'tasa', 'alicuota', 'impuesto', 'porc_iva'],
@@ -246,7 +246,25 @@ export default {
         // 2. Probar si contiene el prefijo si no se encuentra la coincidencia exacta
         if (!matchedCol) {
           matchedCol = excelColumns.value.find(col => 
-            keywords.some(kw => col.toLowerCase().includes(kw))
+            keywords.some(kw => {
+              const colLower = col.toLowerCase();
+              const kwLower = kw.toLowerCase();
+              if (colLower.includes(kwLower)) {
+                // Evitar colisiones entre costo y venta
+                if (erpKey === 'PrecioVenta' && kwLower === 'precio') {
+                  if (colLower.includes('costo') || colLower.includes('compra') || colLower.includes('cost')) {
+                    return false;
+                  }
+                }
+                if (erpKey === 'PrecioCosto' && (kwLower === 'costo' || kwLower === 'cost')) {
+                  if (colLower.includes('venta')) {
+                    return false;
+                  }
+                }
+                return true;
+              }
+              return false;
+            })
           );
         }
 

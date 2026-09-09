@@ -48,3 +48,12 @@ logs/
 # Archivos del Sistema Operativo
 .DS_Store
 Thumbs.db
+
+# Log de Modificaciones Personal
+*LogModificaciones*
+
+# Archivos de script temporales (scratch)
+scratch_*.js
+backend/scratch_*.js
+
+
