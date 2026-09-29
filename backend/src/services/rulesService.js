@@ -418,31 +418,50 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
       // No realizamos validación de descripción duplicada según requerimiento.
     }
 
-    // 3. Procesar costo, precio y margen
+    // 3. Procesar IVA
+    const ivaResult = matchIvaCode(rawIva, dbIvas);
+    if (ivaResult.error) {
+      record.messages.push({ type: 'error', text: ivaResult.message });
+      record.status = 'error';
+      record.IVA = 1; // Fallback (21%)
+    } else {
+      record.IVA = ivaResult.code;
+    }
+    const ivaPercentage = (ivaResult.percentage !== undefined && ivaResult.percentage !== null) ? ivaResult.percentage : 21.0;
+    const factorIva = 1 + (ivaPercentage / 100); // 1.21 para 21%, 1.105 para 10.5%
+    const factorMargen = 1.5; // Margen 50%
+    const factorTotal = factorMargen * factorIva;
+
+    // 4. Procesar costo, precio y margen
     let price = 0;
     if (rawVenta !== null && rawVenta !== undefined && rawVenta !== '') {
       price = parseMoney(rawVenta);
-    } else {
-      record.messages.push({ type: 'warning', text: 'Precio Venta no provisto. Se asignó 0 por defecto.' });
-      if (record.status !== 'error') record.status = 'warning';
-      price = 0;
     }
-    record.PrecioVenta = price;
 
     let cost = 0;
     if (rawCosto !== null && rawCosto !== undefined && rawCosto !== '') {
       cost = parseMoney(rawCosto);
     }
 
-    if (cost > 0) {
-      // Si el Excel provee precio de costo, se respeta
+    if (cost > 0 && price > 0) {
+      // Ambos provistos en el Excel: se respetan ambos
       record.PrecioCosto = cost;
-    } else if (price > 0) {
-      // Si no tiene precio de costo provisto pero sí precio de venta, se calcula el costo (ej: 50% del precio de venta)
-      cost = price * 0.5;
+      record.PrecioVenta = price;
+    } else if (cost > 0 && price === 0) {
+      // Provisto Costo pero no Venta: Venta = Costo * 1.5 * (1 + IVA)
       record.PrecioCosto = cost;
+      record.PrecioVenta = Number((cost * factorTotal).toFixed(2));
+      price = record.PrecioVenta;
+    } else if (price > 0 && cost === 0) {
+      // Provisto Venta pero no Costo: Costo = Venta / (1.5 * (1 + IVA))
+      record.PrecioVenta = price;
+      record.PrecioCosto = Number((price / factorTotal).toFixed(2));
+      cost = record.PrecioCosto;
     } else {
       record.PrecioCosto = 0;
+      record.PrecioVenta = 0;
+      record.messages.push({ type: 'warning', text: 'Precio Venta no provisto. Se asignó 0 por defecto.' });
+      if (record.status !== 'error') record.status = 'warning';
     }
 
     // Calcular margen según fórmula: ((PrecioVenta - PrecioCosto) / PrecioVenta) * 100
@@ -565,15 +584,7 @@ async function processRows(rows, dbServer, dbName, dbUser, dbPassword) {
       if (record.status !== 'error') record.status = 'warning';
     }
 
-    // 6. Procesar IVA
-    const ivaResult = matchIvaCode(rawIva, dbIvas);
-    if (ivaResult.error) {
-      record.messages.push({ type: 'error', text: ivaResult.message });
-      record.status = 'error';
-      record.IVA = 1; // Fallback
-    } else {
-      record.IVA = ivaResult.code;
-    }
+
 
     // 7. Procesar Familia y SubFamilia
     if (rawFamilia !== null && rawFamilia !== undefined && rawFamilia !== '') {

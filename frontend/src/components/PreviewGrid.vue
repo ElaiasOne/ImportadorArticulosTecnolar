@@ -738,15 +738,34 @@ export default {
         row.DescripcionCorta = cleanedDesc.slice(0, 20);
       }
 
-      // 3. Precios
+      // 3. Precios, Costo e IVA
+      const ivaCode = row.IVA;
+      const ivaPerc = (ivaCode === 2) ? 10.5 : 21.0;
+      const factorTotal = 1.5 * (1 + ivaPerc / 100);
+
       let price = parseMoney(row.PrecioVenta);
-      let cost = price * 0.5;
+      let cost = parseMoney(row.PrecioCosto);
+
+      if (editedField === 'PrecioCosto' && cost > 0) {
+        price = Number((cost * factorTotal).toFixed(2));
+      } else if (editedField === 'PrecioVenta' && price > 0) {
+        cost = Number((price / factorTotal).toFixed(2));
+      } else {
+        if (cost > 0 && price === 0) {
+          price = Number((cost * factorTotal).toFixed(2));
+        } else if (price > 0 && cost === 0) {
+          cost = Number((price / factorTotal).toFixed(2));
+        }
+      }
 
       row.PrecioCosto = cost;
       row.PrecioVenta = price;
 
-      // El margen no se calcula, el cliente lo asignará después. Por defecto 0.
-      row.Margen = 0;
+      if (row.PrecioVenta > 0) {
+        row.Margen = Number((((row.PrecioVenta - row.PrecioCosto) / row.PrecioVenta) * 100).toFixed(2));
+      } else {
+        row.Margen = 0;
+      }
 
       // 4. Comprobación de pesables
       const isPesable = isPesableDescription(row.Descripcion);
